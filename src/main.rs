@@ -22,6 +22,9 @@ struct EfiGuid {
     pub data3: [u8; 8],
 }
 
+
+// 名前の通り。GOPのGUID。具体的な値はどこかの仕様書に定義されている。
+// このGUIDがあることでlocate_protocol関数を利用してGOPのポインタを取得できる
 const EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID: EfiGuid = EfiGuid {
     data0: 0x9042a9de,
     data1: 0x23dc,
@@ -46,6 +49,7 @@ struct EfiBootServicesTable {
     ) -> EfiStatus,
 }
 
+// compile時検証。構造体内のメンバーのオフセットが期待通りであることを検証している。
 const _: () = assert!(offset_of!(EfiBootServicesTable, locate_protocol) == 320);
 
 #[repr(C)]
@@ -84,14 +88,17 @@ struct EfiGraphicsOutputProtocolPixelInfo {
 }
 const _: () = assert!(size_of::<EfiGraphicsOutputProtocolPixelInfo>() == 36);
 
+// EFI system tableが提供する関数であるlocate_protocolを使って、EFI Graphic Output Protocolを取得する
+// efi system table自体はハブ的な存在らしい。
 fn locate_graphic_protocol<'a>(
     efi_system_table: &EfiSystemTable,
 ) -> Result<&'a EfiGraphicsOutputProtocol<'a>> {
     let mut graphic_output_protocol = null_mut::<EfiGraphicsOutputProtocol>();
+    // efi system tableにはBootServicesというメンバーがあることは仕様で決まっている
     let status = (efi_system_table.boot_services.locate_protocol)(
-        &EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID,
-        null_mut::<EfiVoid>(),
-        &mut graphic_output_protocol as *mut *mut EfiGraphicsOutputProtocol as *mut *mut EfiVoid,
+        &EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID, // 取得したいプロトコルのGUIDへのポインタ
+        null_mut::<EfiVoid>(), // オプション。通常はNULLらしい。
+        &mut graphic_output_protocol as *mut *mut EfiGraphicsOutputProtocol as *mut *mut EfiVoid, // 取得したプロトコルインターフェースのポインタを格納する場所
     );
 
     if status != EfiStatus::Success {
@@ -108,24 +115,10 @@ pub fn hlt() {
 
 // 外部から参照できるようにするため、マングリングをしない
 // cf. https://qiita.com/7_zidan_/items/3915218f8fda142a6b71
+// 実質的なmain関数
 #[no_mangle]
 fn efi_main(_image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     let mut vram = init_vram(efi_system_table).expect("init_vram failed");
-    // for y in 0..vram.height {
-    //     for x in 0..vram.width {
-    //         if let Some(pixel) = vram.pixel_at_mut(x, y) {
-    //             *pixel = 0x00ff00;
-    //         }
-    //     }
-    // }
-    //
-    // for y in 0..vram.height / 2 {
-    //     for x in 0..vram.width / 2 {
-    //         if let Some(pixel) = vram.pixel_at_mut(x, y) {
-    //             *pixel = 0xff0000;
-    //         }
-    //     }
-    // }
 
     let vw = vram.width;
     let vh = vram.height;
@@ -218,12 +211,13 @@ impl Bitmap for VramBufferInfo {
 
 fn init_vram(efi_system_table: &EfiSystemTable) -> Result<VramBufferInfo> {
     let gp = locate_graphic_protocol(efi_system_table)?;
-
+    
     Ok(VramBufferInfo {
-        buf: gp.mode.frame_buffer_base as *mut u8,
+        // FrameBufferBaseはフレームバッファの先頭物理アドレス
+        buf: gp.mode.frame_buffer_base as *mut u8, // ポインタ型にキャストすることでメモリ領域に直接アクセスできる
         width: gp.mode.info.horizontal_resolution as i64,
         height: gp.mode.info.vertical_resolution as i64,
-        pixels_per_line: gp.mode.info.pixels_per_scan_line as i64,
+        pixels_per_line: gp.mode.info.pixels_per_scan_line as i64, // 画面の１行あたりのピクセル数。実際の画面幅（horizontal_resolution）とは異なることもある
     })
 }
 
