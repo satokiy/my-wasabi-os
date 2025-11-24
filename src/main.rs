@@ -2,6 +2,7 @@
 #![no_main] // 通常はentry pointがmain関数でなければならない
 #![feature(offset_of)] // offset_ofを使うため
 
+// インラインアセンブリ.
 use core::arch::asm;
 use core::cmp::min;
 use core::mem::offset_of;
@@ -322,35 +323,15 @@ fn draw_line<T: Bitmap>(buf: &mut T, color: u32, x0: i64, y0: i64, x1: i64, y1: 
     Ok(())
 }
 
-fn draw_font_fg<T: Bitmap>(buf: &mut T, x: i64, y: i64, color: u32,  c: char) {
-    // TODO: lookup_fontを使うように修正
-    if let Ok(_c) = u8::try_from(c) {
-        let font_a = "
-........
-...**...
-...**...
-...**...
-...**...
-..*..*..
-..*..*..
-..*..*..
-..*..*..
-.******.
-.*....*.
-.*....*.
-.*....*.
-***..***
-........
-........
-";
-        
-        for (dy, row) in font_a.trim().split('\n').enumerate() {
-            for (dx, pixel) in row.chars().enumerate() {
-                let color = match pixel {
+fn draw_font_fg<T: Bitmap>(buf: &mut T, x: i64, y: i64, color: u32, c: char) {
+    if let Some(font) = lookup_font(c) {
+        for (dy, row) in font.iter().enumerate() {
+            for (dx, pixel) in row.iter().enumerate() {
+                let pixel_color = match pixel {
                     '*' => color,
                     _ => continue,
                 };
-                let _ = draw_point(buf, color, x + dx as i64, y + dy as i64);
+                let _ = draw_point(buf, pixel_color, x + dx as i64, y + dy as i64);
             }
         }
     }
@@ -358,7 +339,6 @@ fn draw_font_fg<T: Bitmap>(buf: &mut T, x: i64, y: i64, color: u32,  c: char) {
 
 fn lookup_font(c: char) -> Option<[[char; 8]; 16]> {
     const FONT_SOURCE: &str = include_str!("./font.txt");
-    
     if let Ok(c) = u8::try_from(c) {
         let mut fi = FONT_SOURCE.split('\n');
         while let Some(line) = fi.next() {
@@ -367,8 +347,7 @@ fn lookup_font(c: char) -> Option<[[char; 8]; 16]> {
                     if idx != c {
                         continue;
                     }
-                    
-                    let mut font = [['*';8]; 16];
+                    let mut font = [['*'; 8]; 16];
                     for (y, line) in fi.clone().take(16).enumerate() {
                         for (x, c) in line.chars().enumerate() {
                             if let Some(e) = font[y].get_mut(x) {
